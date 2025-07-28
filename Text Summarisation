@@ -1,0 +1,121 @@
+
+import pandas as pd
+import nltk
+from gensim.summarization import summarize
+from rouge_score import rouge_scorer
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+from collections import Counter
+from transformers import pipeline
+
+# Download NLTK data
+nltk.download('punkt')
+
+# --------- Preprocessing ---------
+def preprocess_text(text):
+    return ''.join(c for c in text.lower() if c.isalnum() or c.isspace() or c in '.!?')
+
+# --------- Extractive Summarization ---------
+def extractive_summary(text, ratio=0.3):
+    try:
+        return summarize(text, ratio=ratio) or text[:500]  # fallback if too short
+    except:
+        return text[:500]
+
+# --------- Abstractive Summarization ---------
+def abstractive_summary(text):
+    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+    summary = summarizer(text, max_length=130, min_length=30, do_sample=False)
+    return summary[0]['summary_text']
+
+# --------- Evaluation (ROUGE) ---------
+def evaluate_summary(original, summary):
+    scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
+    return scorer.score(original, summary)
+
+# --------- Analysis ---------
+def analyze_text(original, summary):
+    original_wc = len(original.split())
+    summary_wc = len(summary.split())
+    compression = (1 - (summary_wc / original_wc)) * 100
+    return {
+        "original_wc": original_wc,
+        "summary_wc": summary_wc,
+        "compression(%)": round(compression, 2),
+        "reading_time_original(min)": round(original_wc / 200, 2),
+        "reading_time_summary(min)": round(summary_wc / 200, 2)
+    }
+
+# --------- Visualization ---------
+def visualize_word_frequency(text):
+    words = text.split()
+    freq = Counter(words).most_common(10)
+    words, values = zip(*freq)
+    plt.bar(words, values, color="skyblue")
+    plt.title("Top 10 Word Frequencies")
+    plt.xticks(rotation=45)
+    plt.show()
+
+    wordcloud = WordCloud(width=800, height=400, background_color="white").generate(text)
+    plt.imshow(wordcloud, interpolation='bilinear')
+    plt.axis('off')
+    plt.title("Word Cloud")
+    plt.show()
+
+def visualize_compression(df):
+    plt.bar(df.index, df['compression(%)'], color="green")
+    plt.title("Text Compression Achieved (%)")
+    plt.xlabel("Document Index")
+    plt.ylabel("Compression %")
+    plt.show()
+
+# --------- Process Multiple Documents ---------
+def process_documents(df, text_column="text"):
+    results = []
+    for idx, text in enumerate(df[text_column]):
+        clean_text = preprocess_text(str(text))
+        # Extractive & Abstractive Summaries
+        ext_summary = extractive_summary(clean_text)
+        abs_summary = abstractive_summary(clean_text)
+        
+        # Evaluation (extractive for comparison)
+        rouge_scores = evaluate_summary(clean_text, ext_summary)
+        
+        # Analysis
+        stats = analyze_text(clean_text, ext_summary)
+        stats.update({"ROUGE-1": round(rouge_scores['rouge1'].fmeasure, 2)})
+        
+        results.append({
+            "original_text": text,
+            "extractive_summary": ext_summary,
+            "abstractive_summary": abs_summary,
+            **stats
+        })
+    
+    return pd.DataFrame(results)
+
+# --------- MAIN ---------
+if __name__ == "__main__":
+    # Load data (example: CSV with 'text' column)
+    # df = pd.read_csv("documents.csv")
+    # For demo, we use inline data:
+    data = {"text": [
+        """The text summarization project aims to develop a system that
+        can generate concise and coherent summaries of long text documents, capturing the main ideas...""",
+        """AI has revolutionized various industries, from healthcare to finance. Deep learning and NLP..."""
+    ]}
+    df = pd.DataFrame(data)
+
+    # Process documents
+    result_df = process_documents(df)
+
+    # Save results
+    result_df.to_excel("summaries.xlsx", index=False)
+    print("Summaries saved to summaries.xlsx")
+
+    # Visualize first document text
+    visualize_word_frequency(preprocess_text(df['text'][0]))
+    visualize_compression(result_df)
+
+    # Display DataFrame
+    print(result_df)
