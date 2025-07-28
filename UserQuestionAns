@@ -1,0 +1,85 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+from transformers import pipeline
+from datasets import load_dataset, load_metric
+
+# --------- 1. Load Dataset (SQuAD Example) ---------
+def load_data():
+    # Using SQuAD dataset (for demonstration)
+    dataset = load_dataset("squad")
+    return dataset['validation']  # small subset for quick demo
+
+# --------- 2. Pre-trained QA Pipeline ---------
+def create_qa_pipeline():
+    # Using BERT-based model fine-tuned on SQuAD
+    return pipeline("question-answering", model="bert-large-uncased-whole-word-masking-finetuned-squad")
+
+# --------- 3. Test Model on Sample Data ---------
+def evaluate_sample(pipeline_qa, dataset, sample_size=5):
+    results = []
+    for i in range(sample_size):
+        context = dataset[i]['context']
+        question = dataset[i]['question']
+        answer = dataset[i]['answers']['text'][0]
+
+        prediction = pipeline_qa(question=question, context=context)
+
+        results.append({
+            "question": question,
+            "true_answer": answer,
+            "predicted_answer": prediction['answer'],
+            "confidence": round(prediction['score'] * 100, 2)
+        })
+    return pd.DataFrame(results)
+
+# --------- 4. Evaluation Metrics (Exact Match & F1) ---------
+def compute_metrics(results):
+    metric = load_metric("squad")
+    predictions = [{"id": str(i), "prediction_text": row["predicted_answer"]} for i, row in results.iterrows()]
+    references = [{"id": str(i), "answers": {"text": [row["true_answer"]], "answer_start": [0]}} for i, row in results.iterrows()]
+    return metric.compute(predictions=predictions, references=references)
+
+# --------- 5. Visualization ---------
+def visualize_confidence(results):
+    plt.bar(results.index, results["confidence"], color="green")
+    plt.xlabel("Sample Index")
+    plt.ylabel("Confidence Score (%)")
+    plt.title("Model Confidence for Sample Questions")
+    plt.ylim(0, 100)
+    plt.show()
+
+# --------- 6. User Interactive QA ---------
+def interactive_qa(pipeline_qa, context):
+    while True:
+        question = input("\nAsk a question (or type 'exit'): ")
+        if question.lower() == 'exit':
+            break
+        result = pipeline_qa(question=question, context=context)
+        print(f"Answer: {result['answer']} (Confidence: {result['score']:.2f})")
+
+# --------- MAIN ---------
+if __name__ == "__main__":
+    # 1. Load data
+    dataset = load_data()
+
+    # 2. Create pipeline
+    qa_pipeline = create_qa_pipeline()
+
+    # 3. Evaluate on sample
+    results_df = evaluate_sample(qa_pipeline, dataset)
+    print("\n--- Sample QA Results ---")
+    print(results_df)
+
+    # 4. Compute metrics
+    metrics = compute_metrics(results_df)
+    print("\n--- Model Evaluation Metrics ---")
+    print(metrics)
+
+    # 5. Visualization
+    visualize_confidence(results_df)
+
+    # 6. Run interactive QA
+    sample_context = dataset[0]['context']
+    print("\nInteractive QA on Sample Context:")
+    print(f"Context: {sample_context[:300]}...\n")
+    interactive_qa(qa_pipeline, sample_context)
